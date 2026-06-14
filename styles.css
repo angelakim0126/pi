@@ -39,6 +39,14 @@ h1 {
   color: var(--accent);
   text-shadow: 0 0 24px rgba(220, 255, 26, 0.25);
 }
+/* Keep the π glyph recognizable as math notation (italic serif, not uppercased) */
+.pi-glyph {
+  text-transform: none;
+  font-family: 'Cambria', 'Georgia', 'Times New Roman', serif;
+  font-style: italic;
+  font-weight: 700;
+  margin-right: 0.06em;
+}
 .subtitle { color: var(--text-dim); font-size: 0.95rem; margin-top: 4px; }
 
 /* Stats */
@@ -261,6 +269,70 @@ h1 {
 #confetti-canvas {
   position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
   pointer-events: none; z-index: 100;
+}
+
+/* ---------- Defender Mode ---------- */
+.mode-btn-wide { grid-column: 1 / -1; }
+
+.defend-rules {
+  display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;
+  font-size: 0.85rem; color: var(--text-dim);
+  margin: 4px 0 4px;
+}
+.defend-rules span {
+  background: var(--card-bg); border: 1px solid var(--card-border);
+  padding: 4px 10px; border-radius: 999px;
+}
+
+.defend-hud {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 4px 2px 8px;
+}
+.defend-target { font-size: 0.95rem; color: var(--text-dim); }
+.defend-target b { color: var(--accent); font-variant-numeric: tabular-nums; font-size: 1.05rem; }
+.defend-lives { display: flex; gap: 4px; }
+.defend-heart {
+  color: var(--wrong);
+  font-size: 1.3rem;
+  filter: drop-shadow(0 0 6px rgba(255, 45, 45, 0.6));
+  animation: heartBeat 1.4s infinite;
+}
+@keyframes heartBeat {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+
+.defend-stage {
+  position: relative;
+  width: 100%;
+  height: 360px;
+  background: #050505;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(220, 255, 26, 0.15);
+  box-shadow: inset 0 0 20px rgba(0,0,0,0.6);
+}
+.defend-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.defend-flash {
+  position: absolute; inset: 0;
+  background: radial-gradient(circle at center, rgba(255,45,45,0.35) 0%, rgba(255,45,45,0) 70%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+.defend-stage.flash .defend-flash { opacity: 1; }
+
+@media (max-width: 768px) {
+  .defend-stage { height: 320px; }
+}
+@media (max-width: 480px) {
+  .defend-stage { height: 280px; }
+  .defend-target { font-size: 0.85rem; }
+  .defend-target b { font-size: 0.95rem; }
 }
 
 @media (max-width: 768px) {
