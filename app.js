@@ -131,6 +131,52 @@ function showGame(mode) {
   MODE_INIT[mode]();
 }
 
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+function scrollActiveIntoView() {
+  const el = document.querySelector('.digit.current, .digit.hidden-slot.next');
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  const pad = 60;
+  if (r.top < pad || r.bottom > window.innerHeight - pad - 200 /* leave room for pad */) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+}
+
+// -------- Leaderboard (Test mode) --------
+function loadLeaderboard() {
+  try { return JSON.parse(localStorage.getItem('pidg_leaderboard') || '[]'); }
+  catch (e) { return []; }
+}
+function saveLeaderboard(arr) {
+  arr.sort((a, b) => (b.digits - a.digits) || ((a.ts || 0) - (b.ts || 0)));
+  localStorage.setItem('pidg_leaderboard', JSON.stringify(arr.slice(0, 50)));
+}
+function addLeaderboardEntry(name, digits) {
+  if (!digits || digits < 1) return null;
+  const entry = { name: (name || 'Player').slice(0, 24), digits, ts: Date.now() };
+  const arr = loadLeaderboard();
+  arr.push(entry);
+  saveLeaderboard(arr);
+  return entry;
+}
+function renderLeaderboardHtml(highlight) {
+  const arr = loadLeaderboard();
+  if (arr.length === 0) {
+    return '<div class="leaderboard-empty">No runs yet — be the first!</div>';
+  }
+  let html = '<table class="leaderboard"><thead><tr><th>#</th><th>Name</th><th>Digits</th><th>When</th></tr></thead><tbody>';
+  arr.slice(0, 10).forEach((e, i) => {
+    const isHi = highlight && e.ts === highlight.ts && e.name === highlight.name && e.digits === highlight.digits;
+    const dateStr = new Date(e.ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    html += `<tr class="${isHi ? 'highlight' : ''}"><td>${i + 1}</td><td>${escapeHtml(e.name)}</td><td><b>${e.digits}</b></td><td>${dateStr}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
 // Render a digit sequence with class per position
 function renderStream(from, to, classOf, opts = {}) {
   let html = '<div class="digit-stream">';
@@ -195,18 +241,29 @@ function renderLearn() {
 
   $('game-stat-display').textContent = `Chunk ${chunkStart}–${chunkEnd}`;
   const contextStart = Math.max(1, chunkStart - 5);
+  const jumpRow = `
+    <div class="jump-row">
+      <label for="jump-input">📍 Jump to digit:</label>
+      <input type="number" id="jump-input" min="1" max="${TARGET}" value="${chunkStart}" inputmode="numeric" />
+      <button class="jump-btn" id="jump-go">Go</button>
+      <button class="jump-btn secondary" id="jump-resume" title="Resume at mastered + 1">Resume</button>
+    </div>`;
 
   if (s.phase === 'study') {
-    let html = `<div class="position-label">Study digits <b>${chunkStart}–${chunkEnd}</b> (highlighted), then hide & recall</div>`;
+    let html = jumpRow;
+    html += `<div class="position-label">Study digits <b>${chunkStart}–${chunkEnd}</b> (highlighted), then hide & recall</div>`;
     html += renderStream(contextStart, chunkEnd, i => i < chunkStart ? 'mastered' : 'current');
     html += '<div class="btn-row"><button class="action-btn" id="hide-btn">Hide & Recall →</button></div>';
     $('game-content').innerHTML = html;
     $('hide-btn').onclick = () => { state.learn.phase = 'recall'; state.learn.typed = ''; renderLearn(); };
+    wireJumpRow();
+    requestAnimationFrame(scrollActiveIntoView);
     return;
   }
 
   // Recall phase
-  let html = `<div class="position-label">From memory: type digits <b>${chunkStart}–${chunkEnd}</b></div>`;
+  let html = jumpRow;
+  html += `<div class="position-label">From memory: type digits <b>${chunkStart}–${chunkEnd}</b></div>`;
   html += '<div class="digit-stream">';
   for (let i = contextStart; i < chunkStart; i++) {
     html += `<span class="digit mastered">${digitAt(i)}</span>`;
@@ -227,6 +284,33 @@ function renderLearn() {
   html += '<div class="btn-row"><button class="action-btn secondary" id="back-study">← Peek again</button></div>';
   $('game-content').innerHTML = html;
   $('back-study').onclick = () => { state.learn.phase = 'study'; state.learn.typed = ''; renderLearn(); };
+  wireJumpRow();
+  requestAnimationFrame(scrollActiveIntoView);
+}
+
+function wireJumpRow() {
+  const input = $('jump-input');
+  if (!input) return;
+  const go = () => {
+    let v = parseInt(input.value, 10);
+    if (isNaN(v)) return;
+    v = Math.max(1, Math.min(TARGET, v));
+    state.learn.startPos = v;
+    state.learn.currentChunk = 0;
+    state.learn.phase = 'study';
+    state.learn.typed = '';
+    input.blur();
+    renderLearn();
+  };
+  $('jump-go').onclick = go;
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+  $('jump-resume').onclick = () => {
+    state.learn.startPos = Math.min(state.mastered + 1, TARGET);
+    state.learn.currentChunk = 0;
+    state.learn.phase = 'study';
+    state.learn.typed = '';
+    renderLearn();
+  };
 }
 
 function learnHandleDigit(d) {
@@ -279,7 +363,7 @@ function learnHandleDigit(d) {
 // TEST MODE — recall run from digit 1 until first mistake
 // =========================================================================
 MODE_INIT.test = function() {
-  state.test = { pos: 0, started: false, ended: false };
+  state.test = { pos: 0, started: false, ended: false, name: localStorage.getItem('pidg_test_name') || '' };
   renderTest();
 };
 
@@ -288,11 +372,26 @@ function renderTest() {
   $('game-stat-display').textContent = `Best: ${state.bestRun}`;
 
   if (!s.started) {
+    const cachedName = localStorage.getItem('pidg_test_name') || '';
     $('game-content').innerHTML = `
       <div class="position-label">Recall Run</div>
-      <div class="instruction">Type the digits of π from memory, starting with <b>3</b>.<br>One mistake ends the run.</div>
-      <div class="btn-row"><button class="action-btn" id="start-test">Start →</button></div>`;
-    $('start-test').onclick = () => { state.test.started = true; renderTest(); };
+      <div class="instruction">Type the digits of π from memory, starting with <b>3</b>. One mistake ends the run.</div>
+      <div class="name-row">
+        <label for="player-name">Your name:</label>
+        <input type="text" id="player-name" maxlength="24" value="${escapeHtml(cachedName)}" placeholder="Player" autocomplete="off" />
+      </div>
+      <div class="btn-row"><button class="action-btn" id="start-test">Start →</button></div>
+      <div class="leaderboard-section">
+        <h3>🏆 Leaderboard</h3>
+        ${renderLeaderboardHtml()}
+      </div>`;
+    $('start-test').onclick = () => {
+      const nameVal = ($('player-name').value || '').trim().slice(0, 24) || 'Player';
+      localStorage.setItem('pidg_test_name', nameVal);
+      state.test.name = nameVal;
+      state.test.started = true;
+      renderTest();
+    };
     return;
   }
 
@@ -322,19 +421,26 @@ function endTestRun(wrongDigit) {
   updateBestRun(reached);
   updateMastered(Math.min(reached, state.mastered));  // never decreases
 
+  const entry = addLeaderboardEntry(s.name || localStorage.getItem('pidg_test_name') || 'Player', reached);
+
   let extra = '';
   if (wrongDigit !== undefined) {
     extra = `<p class="sub">You typed <b style="color:var(--wrong)">${wrongDigit}</b> at digit ${reached + 1}; the correct one was <b style="color:var(--correct)">${digitAt(reached + 1)}</b>.</p>`;
   }
+  const who = escapeHtml(s.name || 'You');
   $('game-content').innerHTML = `
     <div class="result-card">
       <div class="result-emoji">${isNewBest ? '🏆' : (reached >= 100 ? '⭐' : '👍')}</div>
-      <h2>You reached digit ${reached}</h2>
+      <h2>${who} reached digit ${reached}</h2>
       ${extra}
       <p class="sub">Best: ${state.bestRun}${isNewBest ? ' (new record!)' : ''}</p>
       <div class="btn-row" style="margin-top: 16px;">
         <button class="action-btn" id="retry-test">Try again</button>
         <button class="action-btn secondary" id="home-test">Home</button>
+      </div>
+      <div class="leaderboard-section">
+        <h3>🏆 Leaderboard</h3>
+        ${renderLeaderboardHtml(entry)}
       </div>
     </div>`;
   $('retry-test').onclick = () => MODE_INIT.test();
@@ -354,14 +460,20 @@ function testHandleDigit(d) {
       updateBestRun(TARGET);
       updateMastered(TARGET);
       s.ended = true;
+      const entry = addLeaderboardEntry(s.name || localStorage.getItem('pidg_test_name') || 'Player', TARGET);
+      const who = escapeHtml(s.name || 'You');
       $('game-content').innerHTML = `
         <div class="result-card">
           <div class="result-emoji">🏆🥧🏆</div>
-          <h2>200 digits! Perfect run.</h2>
+          <h2>${who}: 200 digits! Perfect run.</h2>
           <p class="sub">You're a pi master.</p>
           <div class="btn-row" style="margin-top: 16px;">
             <button class="action-btn" id="retry-perfect">Do it again</button>
             <button class="action-btn secondary" id="home-perfect">Home</button>
+          </div>
+          <div class="leaderboard-section">
+            <h3>🏆 Leaderboard</h3>
+            ${renderLeaderboardHtml(entry)}
           </div>
         </div>`;
       $('retry-perfect').onclick = () => MODE_INIT.test();
@@ -369,6 +481,7 @@ function testHandleDigit(d) {
       confetti(180); sounds.milestone();
     } else {
       renderTest();
+      requestAnimationFrame(scrollActiveIntoView);
     }
   } else {
     sounds.wrong();
@@ -496,6 +609,8 @@ function renderBlanks() {
     $('bl-again').onclick = () => MODE_INIT.blanks();
     $('bl-home').onclick = showHome;
     if (s.correct === s.blanks.length) { confetti(80); sounds.milestone(); }
+  } else {
+    requestAnimationFrame(scrollActiveIntoView);
   }
 }
 
@@ -536,10 +651,11 @@ document.querySelectorAll('.mode-btn').forEach(b => {
 $('back-btn').addEventListener('click', showHome);
 $('sound-toggle').addEventListener('change', e => { state.soundEnabled = e.target.checked; save(); });
 $('reset-btn').addEventListener('click', () => {
-  if (confirm('Reset all progress? This clears your mastered digits and best run.')) {
+  if (confirm('Reset everything? This clears mastered digits, best run, and the leaderboard.')) {
     state.mastered = 0;
     state.bestRun = 0;
     save();
+    localStorage.removeItem('pidg_leaderboard');
     renderHome();
   }
 });
@@ -549,6 +665,9 @@ document.querySelectorAll('.number-pad button').forEach(b => {
 });
 
 document.addEventListener('keydown', e => {
+  // Don't capture digits when the user is typing in an input (jump-to-digit, name)
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
   if (/^[0-9]$/.test(e.key)) handleDigit(e.key);
   else if (e.key === 'Escape') {
     if (state.currentMode) showHome();
