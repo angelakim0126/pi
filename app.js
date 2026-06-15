@@ -316,7 +316,7 @@ function wireJumpRow() {
 
 function learnHandleDigit(d) {
   const s = state.learn;
-  if (s.phase !== 'recall') return;
+  if (s.phase !== 'recall' || s.locked) return;
   const [chunkStart, chunkEnd] = learnChunkRange();
   const idx = s.typed.length;
   const expected = digitAt(chunkStart + idx);
@@ -327,6 +327,7 @@ function learnHandleDigit(d) {
     renderLearn();
     if (s.typed.length === chunkEnd - chunkStart + 1) {
       // chunk complete
+      s.locked = true;
       const newMastered = chunkEnd;
       const previousMastered = state.mastered;
       updateMastered(newMastered);
@@ -342,6 +343,7 @@ function learnHandleDigit(d) {
         s.phase = 'study';
         s.typed = '';
         s.chunkErrors = 0;
+        s.locked = false;
         renderLearn();
       }, 900);
     }
@@ -349,12 +351,14 @@ function learnHandleDigit(d) {
     sounds.wrong();
     s.typed += d;
     s.chunkErrors++;
+    s.locked = true;
     renderLearn();
     const fb = $('learn-feedback');
     if (fb) { fb.textContent = `Not quite — it was ${expected}. Let's study it again.`; fb.className = 'feedback bad'; }
     setTimeout(() => {
       s.typed = '';
       s.phase = 'study';
+      s.locked = false;
       renderLearn();
     }, 1500);
   }
@@ -414,10 +418,14 @@ function renderTest() {
   $('give-up').onclick = endTestRun;
 }
 
-function endTestRun(wrongDigit) {
+function endTestRun(wrongDigit, expectedDigit, errorPos) {
   const s = state.test;
   s.ended = true;
-  const reached = s.pos;
+  // Use the position captured at the moment of the wrong keystroke if provided
+  // (prevents the race where a fast follow-up keypress advances s.pos before
+  //  the result screen reads it, making the error message misleading).
+  const reached = errorPos != null ? errorPos : s.pos;
+  s.pos = reached;
   const isNewBest = reached > state.bestRun;
   updateBestRun(reached);
   updateMastered(Math.min(reached, state.mastered));  // never decreases
@@ -426,7 +434,8 @@ function endTestRun(wrongDigit) {
 
   let extra = '';
   if (wrongDigit !== undefined) {
-    extra = `<p class="sub">You typed <b style="color:var(--wrong)">${wrongDigit}</b> at digit ${reached + 1}; the correct one was <b style="color:var(--correct)">${digitAt(reached + 1)}</b>.</p>`;
+    const correctChar = expectedDigit !== undefined ? expectedDigit : digitAt(reached + 1);
+    extra = `<p class="sub">You typed <b style="color:var(--wrong)">${wrongDigit}</b> at digit ${reached + 1}; the correct one was <b style="color:var(--correct)">${correctChar}</b>.</p>`;
   }
   const who = escapeHtml(s.name || 'You');
   $('game-content').innerHTML = `
@@ -486,7 +495,12 @@ function testHandleDigit(d) {
     }
   } else {
     sounds.wrong();
-    setTimeout(() => endTestRun(d), 200);
+    // Capture position + expected NOW; lock the run so subsequent fast keypresses
+    // can't advance s.pos during the 200ms result-screen delay.
+    const errorPos = s.pos;
+    const errorExpected = expected;
+    s.ended = true;
+    setTimeout(() => endTestRun(d, errorExpected, errorPos), 200);
   }
 }
 
