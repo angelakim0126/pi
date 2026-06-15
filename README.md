@@ -1,6 +1,6 @@
 # π Digits Challenge
 
-A kid-friendly memorization game for the digits of pi — up to 200 digits. Built for George.
+A kid-friendly memorization game for the digits of pi — up to 300 digits. Built for George.
 
 ## Modes
 
@@ -12,7 +12,7 @@ A kid-friendly memorization game for the digits of pi — up to 200 digits. Buil
 ## Run locally
 
 ```bash
-cd ~/Documents/pi-digits-game
+cd ~/Documents/pi
 python3 -m http.server 8000
 # open http://localhost:8000
 ```
@@ -21,7 +21,7 @@ python3 -m http.server 8000
 
 - `index.html` — markup and mode buttons
 - `styles.css` — kid-friendly theme (dark purple + gold/pink accents)
-- `app.js` — all game logic, pi constant (250 digits), confetti, Web Audio tones, localStorage progress
+- `app.js` — all game logic, pi constant (320 digits stored, target 300), confetti, Web Audio tones, localStorage progress
 
 ## Progress storage
 
@@ -34,4 +34,4 @@ Progress is saved in `localStorage` under keys:
 
 ## Digit-counting convention
 
-Position 1 = "3", position 2 = "1", position 3 = "4", … position 200 = "9".
+Position 1 = "3", position 2 = "1", position 3 = "4", … position 200 = "9", position 300 = "7".
