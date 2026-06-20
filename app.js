@@ -365,22 +365,31 @@ function learnHandleDigit(d) {
 }
 
 // =========================================================================
-// TEST MODE — recall run from digit 1 until first mistake
+// TEST MODE — recall run from digit 1 with 3 lives; no answer reveal on miss
 // =========================================================================
+const TEST_LIVES = 3;
 MODE_INIT.test = function() {
-  state.test = { pos: 0, started: false, ended: false, name: localStorage.getItem('pidg_test_name') || '' };
+  state.test = {
+    pos: 0, started: false, ended: false,
+    name: localStorage.getItem('pidg_test_name') || '',
+    lives: TEST_LIVES,
+  };
   renderTest();
 };
 
+function livesDisplay(lives) {
+  return '❤️'.repeat(Math.max(0, lives)) + '🖤'.repeat(Math.max(0, TEST_LIVES - lives));
+}
+
 function renderTest() {
   const s = state.test;
-  $('game-stat-display').textContent = `Best: ${state.bestRun}`;
 
   if (!s.started) {
+    $('game-stat-display').textContent = `Best: ${state.bestRun}`;
     const cachedName = localStorage.getItem('pidg_test_name') || '';
     $('game-content').innerHTML = `
       <div class="position-label">Recall Run</div>
-      <div class="instruction">Type the digits of π from memory, starting with <b>3</b>. One mistake ends the run.</div>
+      <div class="instruction">Type the digits of π from memory, starting with <b>3</b>. You have <b>${TEST_LIVES} lives</b> — a wrong digit costs one life, but the answer stays hidden so you can try again.</div>
       <div class="name-row">
         <label for="player-name">Your name:</label>
         <input type="text" id="player-name" maxlength="24" value="${escapeHtml(cachedName)}" placeholder="Player" autocomplete="off" />
@@ -402,6 +411,8 @@ function renderTest() {
 
   if (s.ended) return; // result screen handles itself
 
+  $('game-stat-display').textContent = `${livesDisplay(s.lives)} • Best: ${state.bestRun}`;
+
   // Show last ~16 correct + the "?" slot
   const showFrom = Math.max(1, s.pos - 14);
   let html = `<div class="position-label">Digit ${s.pos + 1} of ${TARGET}</div>`;
@@ -418,13 +429,10 @@ function renderTest() {
   $('give-up').onclick = endTestRun;
 }
 
-function endTestRun(wrongDigit, expectedDigit, errorPos) {
+function endTestRun(reachedOverride) {
   const s = state.test;
   s.ended = true;
-  // Use the position captured at the moment of the wrong keystroke if provided
-  // (prevents the race where a fast follow-up keypress advances s.pos before
-  //  the result screen reads it, making the error message misleading).
-  const reached = errorPos != null ? errorPos : s.pos;
+  const reached = reachedOverride != null ? reachedOverride : s.pos;
   s.pos = reached;
   const isNewBest = reached > state.bestRun;
   updateBestRun(reached);
@@ -432,17 +440,11 @@ function endTestRun(wrongDigit, expectedDigit, errorPos) {
 
   const entry = addLeaderboardEntry(s.name || localStorage.getItem('pidg_test_name') || 'Player', reached);
 
-  let extra = '';
-  if (wrongDigit !== undefined) {
-    const correctChar = expectedDigit !== undefined ? expectedDigit : digitAt(reached + 1);
-    extra = `<p class="sub">You typed <b style="color:var(--wrong)">${wrongDigit}</b> at digit ${reached + 1}; the correct one was <b style="color:var(--correct)">${correctChar}</b>.</p>`;
-  }
   const who = escapeHtml(s.name || 'You');
   $('game-content').innerHTML = `
     <div class="result-card">
       <div class="result-emoji">${isNewBest ? '🏆' : (reached >= 100 ? '⭐' : '👍')}</div>
       <h2>${who} reached digit ${reached}</h2>
-      ${extra}
       <p class="sub">Best: ${state.bestRun}${isNewBest ? ' (new record!)' : ''}</p>
       <div class="btn-row" style="margin-top: 16px;">
         <button class="action-btn" id="retry-test">Try again</button>
@@ -495,12 +497,27 @@ function testHandleDigit(d) {
     }
   } else {
     sounds.wrong();
-    // Capture position + expected NOW; lock the run so subsequent fast keypresses
-    // can't advance s.pos during the 200ms result-screen delay.
-    const errorPos = s.pos;
-    const errorExpected = expected;
-    s.ended = true;
-    setTimeout(() => endTestRun(d, errorExpected, errorPos), 200);
+    s.lives--;
+    $('game-stat-display').textContent = `${livesDisplay(s.lives)} • Best: ${state.bestRun}`;
+    if (s.lives <= 0) {
+      const finalPos = s.pos;
+      s.ended = true;
+      setTimeout(() => endTestRun(finalPos), 400);
+    } else {
+      const fb = $('test-feedback');
+      if (fb) {
+        const livesText = s.lives === 1 ? '1 life left!' : `${s.lives} lives left`;
+        fb.textContent = `Not quite — try again. ${livesText}`;
+        fb.className = 'feedback bad';
+      }
+      // After a moment, restore the streak label so the player sees their progress again
+      const failedAtPos = s.pos;
+      setTimeout(() => {
+        if (state.test !== s || s.ended || s.pos !== failedAtPos) return;
+        const fb2 = $('test-feedback');
+        if (fb2) { fb2.textContent = `Streak: ${s.pos}`; fb2.className = 'feedback good'; }
+      }, 1800);
+    }
   }
 }
 
